@@ -1,1 +1,2 @@
 A compilation of projects I have started to help me understand how to program in lower level languages....as time passes and I feel comfortable with C I will probably add some Rust into the mix. First I want to learn how to properly allocate memory and have a better understanding of the stack. Any and all feedback is welcome. Most(if not all) of the projects will revolve around security and networking. This is my passion and hopefully soon to be my daily 9-5.
+Side Note: exploit.c was not written by me.
