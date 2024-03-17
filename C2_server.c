@@ -72,7 +72,7 @@ int main (int argc, char *argv[]) {
     
     while ((opt = getopt(argc, argv, "i:m:lsrh")) != -1) {
         switch (opt) {
-            case 'i':
+            case 'i':  // handles ip addresses
                 if (!inet_aton(optarg, &((struct sockaddr_in *)&sockAddr)->sin_addr)) {
                     perror("Invalid IP Address");
                     return EXIT_FAILURE;
