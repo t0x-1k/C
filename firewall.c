@@ -4,6 +4,7 @@
 #include <string.h>               
 #include <sys/socket.h>
 #include <unistd.h> 
+#include <bits/getopt_core.h>
 
 #define PORT 8080
 
@@ -18,10 +19,15 @@ int ruleCount = 0;
 
 int check_rule(const char* ip_address, int port);
 void add_rule(const char* ip_address, int port, int allow);
+void save_file(const char* filename);
+void load_file(const char* filename);
 
 int  main(int argc, char *argv[]) {
 
+    load_file("firewall_rules.txt");
+
     int opt = 1;
+    char *outFilename = "output.txt";
     char ip[16] = {0}; 
     int port = -1;
     int allow = 1;
@@ -32,7 +38,7 @@ int  main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    while ((opt = getopt(argc, argv, "a:d:i:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "a:d:p:o")) != -1) {
         switch (opt) {
             case 'a':
                 allow = 1;
@@ -42,14 +48,14 @@ int  main(int argc, char *argv[]) {
                 allow = 0;
                 strncpy(ip, optarg, sizeof(ip) - 1);
                 break;
-            case 'i':
-                strncpy(ip, optarg, sizeof(ip) - 1);
-                break;
             case 'p':
                 port = atoi(optarg);
                 break;
+            case 'o':
+            outFilename = optarg;
+                break;
             default:
-                fprintf(stderr, "Usage: %s [-a allow_ip] [-d deny_ip] [-i ip_address] [-p port]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-a allow_ip] [-d deny_ip] [-p port] [-o output file]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
@@ -97,13 +103,22 @@ int  main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    read(new_socket, buffer, 1024);
-    printf("%s\n", buffer);
+    ssize_t bytes_read = read(new_socket, buffer, sizeof(buffer) -1);
+    if (bytes_read < 0) {
+        perror("Read error");
+        exit(EXIT_FAILURE);
+    }else{
+        buffer[bytes_read] = '\0';
+        printf("%s\n",buffer);
+    }
+
     send(new_socket, hello, strlen(hello), 0);
     printf("Message Sent\n");
 
     close(new_socket);
     close(server_fd);
+
+    save_file(outFilename);
 
 
     free(rules);
@@ -135,4 +150,39 @@ void add_rule(const char*  ip_address, int port, int allow) {
     rules[ruleCount].allow = allow;
 
     ruleCount++;
+}
+
+
+void save_file(const char* filename) {
+    FILE *file = fopen(filename , "w");
+    if (file == NULL) {
+        perror("Error opening file!");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < ruleCount; i++) {
+        fprintf(file, "%s %d %d\n", rules[i].ip_address, rules[i].port, rules[i].allow);
+    }
+
+    fclose(file);
+    printf("Rules saved to %s\n", filename);
+}
+
+void load_file(const char* filename) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        printf("Warning: Could not open %s for reading\n", filename);
+        return;
+
+    }
+
+    char ip_address[16];
+    int port, allow;
+
+    while ( fscanf(file, "%15s %d %d", ip_address, &port, &allow) == 3) {
+        add_rule(ip_address, port, allow);
+    }
+
+    fclose(file);
+    printf("Rules loaded from %s\n", filename);
 }
