@@ -3,6 +3,7 @@
 #include <stdlib.h> 
 #include <string.h>               
 #include <sys/socket.h>
+#include <regex.h>
 #include <unistd.h> 
 #include <bits/getopt_core.h>
 
@@ -21,6 +22,8 @@ int check_rule(const char* ip_address, int port);
 void add_rule(const char* ip_address, int port, int allow);
 void save_file(const char* filename);
 void load_file(const char* filename);
+int validate_ip(const char* ip);
+int validate_port(int port);
 
 int  main(int argc, char *argv[]) {
 
@@ -34,11 +37,11 @@ int  main(int argc, char *argv[]) {
 
     if (argc == 1) {
         // If the program is run without any arguments, print usage information.
-        fprintf(stderr, "Usage: %s [-a allow_ip] [-d deny_ip] [-i ip_address] [-p port]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-a allow_ip] [-d deny_ip] [-i ip_address] [-p port] [-o output file]\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    while ((opt = getopt(argc, argv, "a:d:p:o")) != -1) {
+    while ((opt = getopt(argc, argv, "a:d:p:o:")) != -1) {
         switch (opt) {
             case 'a':
                 allow = 1;
@@ -59,6 +62,10 @@ int  main(int argc, char *argv[]) {
                 exit(EXIT_FAILURE);
         }
     }
+
+    add_rule(ip, port, allow);
+
+    save_file(outFilename);
 
     if ( ip[0] != 0 && port != -1 && allow != -1) {
         add_rule(ip, port, allow);
@@ -98,32 +105,48 @@ int  main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-        perror("accept");
+    struct timeval tv;
+    fd_set readfds;
+
+    tv.tv_sec = 2; // Timeout in seconds
+    tv.tv_usec =  0; // Timeout in microseconds
+
+    FD_ZERO(&readfds);
+    FD_SET(server_fd, &readfds);
+
+    int select_result = select(server_fd + 1, &readfds, NULL, NULL, &tv);
+
+    if (select_result > 0) {
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            perror("accept");
+            exit(EXIT_FAILURE);
+        }
+
+        ssize_t bytes_read = read(new_socket, buffer, sizeof(buffer) -1);
+        if (bytes_read < 0) {
+            perror("Read error");
+            close(new_socket); 
+            exit(EXIT_FAILURE);
+        } else {
+            buffer[bytes_read] = '\0';
+            printf("%s\n", buffer);
+        }
+        
+        close(new_socket); 
+    } else if (select_result == 0) {
+        printf("No incoming connections within the timeout period.\n");
+    } else {
+        perror("select");
         exit(EXIT_FAILURE);
     }
 
-    ssize_t bytes_read = read(new_socket, buffer, sizeof(buffer) -1);
-    if (bytes_read < 0) {
-        perror("Read error");
-        exit(EXIT_FAILURE);
-    }else{
-        buffer[bytes_read] = '\0';
-        printf("%s\n",buffer);
-    }
+    close(server_fd); 
 
-    send(new_socket, hello, strlen(hello), 0);
-    printf("Message Sent\n");
-
-    close(new_socket);
-    close(server_fd);
-
-    save_file(outFilename);
-
-
-    free(rules);
+    free(rules); 
     rules = NULL;
-    return 0;
+
+    return 0; 
+
 }
 
 int check_rule(const char* ip_address, int port) {
@@ -152,28 +175,38 @@ void add_rule(const char*  ip_address, int port, int allow) {
     ruleCount++;
 }
 
-
 void save_file(const char* filename) {
-    FILE *file = fopen(filename , "w");
+    // Open the file using the provided filename for writing
+    FILE *file = fopen(filename, "w");
     if (file == NULL) {
-        perror("Error opening file!");
-        exit(EXIT_FAILURE);
+        perror("Failed to open file for writing");
+        return;
     }
 
+    printf("Saving rules to %s\n", filename);
+
+    // Iterate through the rules and write each to the file
     for (int i = 0; i < ruleCount; i++) {
         fprintf(file, "%s %d %d\n", rules[i].ip_address, rules[i].port, rules[i].allow);
     }
 
-    fclose(file);
-    printf("Rules saved to %s\n", filename);
+    if (ferror(file)) {
+        perror("Failed to write to the file");
+    }
+
+    if (fclose(file) != 0) {
+        perror("Failed to close the file after writing");
+    } else {
+        // Success message for diagnostic purposes
+        printf("Firewall rules successfully saved to %s\n", filename);
+    }
 }
 
 void load_file(const char* filename) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
-        printf("Warning: Could not open %s for reading\n", filename);
+        fprintf(stderr, "Info: No existing rules to load from %s. Starting fresh.\n", filename);
         return;
-
     }
 
     char ip_address[16];
@@ -185,4 +218,28 @@ void load_file(const char* filename) {
 
     fclose(file);
     printf("Rules loaded from %s\n", filename);
+}
+
+int validate_ip(const char* ip) {
+    regex_t regex;
+    int ret;
+    
+    ret = regcomp(&regex, "^([0-9]{1-3}\\.){3}[0-9]{1,3}$", REG_EXTENDED);
+    if (ret) {
+        fprintf(stderr, "Could not compile regex\n");
+        return 0;
+    }
+
+    ret = regexec(&regex, ip, 0, NULL, 0);
+    if (!ret) {
+        regfree(&regex);
+        return 1;
+    }else{
+        regfree( &regex );
+        return 0;
+    }
+}
+
+int validate_port(int port) {
+    return port > 0 && port <= 65535;
 }
